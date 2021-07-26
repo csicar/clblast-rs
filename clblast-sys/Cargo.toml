@@ -1,6 +1,9 @@
 [package]
 name = "clblast-sys"
 version = "0.1.0"
+description = "clblast bindings for rust"
+license="Apache License 2.0"
+repository="https://github.com/csicar/clblast-rs"
 authors = ["csicar <carsten.csiky@gmail.com>"]
 edition = "2018"
 build="build.rs"
