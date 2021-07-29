@@ -11,14 +11,14 @@ edition = "2018"
 
 [dependencies]
 ocl="0.19.3"
-ocl-core="*"
-clblast-sys = { version = "*", path = "../clblast-sys" }
+ocl-core="0.11.2"
+clblast-sys = { version = "0.1.0", path = "../clblast-sys" }
 typed-builder="0.9.0"
 
 [dev-dependencies]
 criterion = "0.3"
 rand="0.8.4"
-rand_chacha="*"
+rand_chacha="0.3.1"
 
 [[bench]]
 name = "criterion_bench"
