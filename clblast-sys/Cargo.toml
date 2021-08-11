@@ -12,17 +12,12 @@ build="build.rs"
 
 [dependencies]
 libc="0.2"
-ocl-core="0.11.2"
 cl-sys="0.4.2"
-snafu="0.6.10"
 
 
 [build-dependencies]
-# cc = { version = "1.0", features = ["parallel"] }
 cmake = "0.1"
 bindgen ="0.58.1"
-
-pkg-config = "0.3"
 
 [dev-dependencies]
 ocl ="0.19.3"

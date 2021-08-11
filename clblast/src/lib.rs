@@ -1,14 +1,86 @@
-use clblast_sys::Error;
-use clblast_sys::blast_sgemm;
-use clblast_sys::clear_cache;
-use clblast_sys::MatrixLayout;
-use clblast_sys::MatrixTranspose;
+use std::ptr;
+
+use clblast_sys::CLBlastLayout__CLBlastLayoutColMajor;
+use clblast_sys::CLBlastLayout__CLBlastLayoutRowMajor;
+use clblast_sys::CLBlastSgemm;
+use clblast_sys::CLBlastSide__CLBlastSideLeft;
+use clblast_sys::CLBlastSide__CLBlastSideRight;
+use clblast_sys::CLBlastTranspose__CLBlastTransposeConjugate;
+use clblast_sys::CLBlastTranspose__CLBlastTransposeNo;
+use clblast_sys::CLBlastTranspose__CLBlastTransposeYes;
+use clblast_sys::CLBlastSide;
+use clblast_sys::CLBlastLayout;
+use clblast_sys::CLBlastTriangle__CLBlastTriangleLower;
+use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
 use ocl::Buffer;
 use ocl::OclPrm;
 use ocl::Queue;
+use ocl::ffi::c_uint;
 use ocl_core::wait_for_events;
 use ocl_core::Event;
 mod builder;
+mod result;
+
+use result::Error;
+
+pub enum MatrixLayout {
+    ColMajor,
+    RowMajor,
+  }
+  impl MatrixLayout {
+    fn to_c(&self) -> c_uint {
+        match self {
+            Self::ColMajor => CLBlastLayout__CLBlastLayoutColMajor,
+            Self::RowMajor => CLBlastLayout__CLBlastLayoutRowMajor,
+        }
+    }
+  }
+  
+  pub enum MatrixTranspose {
+    Yes,
+    No,
+    Conjugate,
+  }
+  
+  impl MatrixTranspose {
+    fn to_c(&self) -> c_uint {
+        match self {
+            Self::Yes => CLBlastTranspose__CLBlastTransposeYes,
+            Self::No => CLBlastTranspose__CLBlastTransposeNo,
+            Self::Conjugate => CLBlastTranspose__CLBlastTransposeConjugate,
+        }
+    }
+  }
+  
+  
+  pub enum MultiplicationSide {
+    Left,
+    Right
+  }
+  impl MultiplicationSide {
+    fn to_c(self: &Self) -> CLBlastSide {
+        match self {
+            MultiplicationSide::Left => CLBlastSide__CLBlastSideLeft,
+            MultiplicationSide::Right => CLBlastSide__CLBlastSideRight,
+        }
+    }
+  }
+  
+  pub enum TriangleLayout {
+    Upper,
+    Lower
+  }
+  
+  impl TriangleLayout{ 
+    fn to_c(self: &Self) -> CLBlastLayout {
+        match self {
+            TriangleLayout::Upper => CLBlastTriangle__CLBlastTriangleUpper,
+            TriangleLayout::Lower => CLBlastTriangle__CLBlastTriangleLower,
+        }
+    }
+  }
+  
+  
 
 pub struct RowMatrix<T: OclPrm> {
     rows: usize,
@@ -72,29 +144,29 @@ impl MultiplicationExecutor<f32> for Queue {
         assert_eq!(c.rows, a.rows, "c.columns /= a.rows (m)");
         let m = c.columns;
 
-        let res = blast_sgemm(
-            MatrixLayout::RowMajor,
-            MatrixTranspose::No,
-            MatrixTranspose::No,
-            m,
-            n,
-            k,
+        let res = CLBlastSgemm(
+            MatrixLayout::RowMajor.to_c(),
+            MatrixTranspose::No.to_c(),
+            MatrixTranspose::No.to_c(),
+            m as u64,
+            n as u64,
+            k as u64,
             alpha,
-            &a.buffer,
-            a.offset,
-            k,
-            &b.buffer,
-            b.offset,
-            n,
+            a.buffer.as_ptr(),
+            a.offset as u64,
+            k as u64,
+            b.buffer.as_ptr(),
+            b.offset as u64,
+            n as u64,
             beta,
-            &c.buffer,
-            c.offset,
-            n,
-            self.as_core(),
-            None::<()>,
+            c.buffer.as_ptr(),
+            c.offset as u64,
+            n as u64,
+            &mut self.as_ptr(),
+            &mut ptr::null_mut()
         );
 
-        res
+        Error::from_c_either(res)
     }
 }
 

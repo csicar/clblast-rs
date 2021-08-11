@@ -49,6 +49,7 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
-    bindings.write_to_file("bindings.debug.rs");
+    // // for debugging:
+    // bindings.write_to_file("bindings.debug.rs");
 
 }
