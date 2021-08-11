@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use clblast::sgemm;
+use clblast::MultiplicationExecutor;
 use clblast::RowMatrix;
 use criterion::BenchmarkId;
 use ocl::flags;
@@ -30,7 +30,7 @@ fn bench_sgemm(c: &mut Criterion) {
             |bencher, &size| {
                 println!("Number of Streams: {}", size);
                 let no_streams = size;
-                let no_samples = 800;
+                let no_samples = 1600;
 
                 let a_buffer = pro_que
                     .buffer_builder()
@@ -76,6 +76,7 @@ fn bench_sgemm(c: &mut Criterion) {
                 let mut c = RowMatrix::new(no_samples, no_streams, c_buffer);
                 
                 bencher.iter(|| {
+                    let before_write = Instant::now();
                     c.buffer
                         .write(
                             &(0..no_streams * no_samples)
@@ -84,10 +85,10 @@ fn bench_sgemm(c: &mut Criterion) {
                         )
                         .enq()
                         .unwrap();
-
+                    println!("write time: {:?}", before_write.elapsed());
                     let before = Instant::now();
-                    let err_code = unsafe { sgemm(&a, &b, &mut c, 1.0, 0.0, &pro_que.queue()) };
-                    println!("err code: {}", err_code);
+                    let err_code = unsafe { pro_que.queue().multiply(&a, &b, &mut c, 1.0, 0.0) };
+                    println!("err code: {:?}", err_code);
 
                     let mut c_dat = vec![0.0; no_streams * no_samples];
                     c.buffer.read(&mut c_dat[..]).enq().unwrap();

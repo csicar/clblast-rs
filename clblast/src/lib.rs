@@ -32,7 +32,7 @@ where
     }
 }
 
-trait MultiplicationExecutor<T>
+pub trait MultiplicationExecutor<T>
 where
     T: OclPrm,
 {
