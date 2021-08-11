@@ -165,8 +165,8 @@ mod test {
                 buffer[get_global_id(0)] += scalar;
             }
         "#;
-        let no_streams = 10240;
-        let no_samples = 800;
+        let no_streams = 64;
+        let no_samples = 64;
         let mut rng = ChaCha20Rng::seed_from_u64(133701010);
 
         let pro_que = ProQue::builder()

@@ -2,7 +2,7 @@ use libc::c_uint;
 
 mod internal;
 
-use cl_sys::{c_int, clWaitForEvents};
+use cl_sys::{c_int, c_void, clWaitForEvents};
 use internal::*;
 use ocl_core::ClNullEventPtr;
 use snafu::{ensure, Backtrace, ErrorCompat, ResultExt, Snafu};
@@ -66,10 +66,10 @@ pub unsafe fn blast_sgemm<En: ClNullEventPtr>(
     queue: &ocl_core::CommandQueue,
     event: Option<En>,
 ) -> Result<(), Error> {
-    let q = queue.as_ptr();
-    let ev: *mut *mut _cl_event = match event {
-        None => &mut ptr::null_mut::<_cl_event>(),
-        Some(mut event) => &mut event.alloc_new().cast::<_cl_event>(),
+    let mut q = queue.as_ptr();
+    let ev: *mut *mut c_void = match event {
+        None => &mut ptr::null_mut::<c_void>(),
+        Some(mut event) => &mut event.alloc_new().cast::<c_void>(),
     };
 
     let status_code = CLBlastSgemm(
@@ -80,17 +80,17 @@ pub unsafe fn blast_sgemm<En: ClNullEventPtr>(
         n as u64,
         k as u64,
         alpha,
-        a_buffer.as_ptr().cast::<_cl_mem>(),
+        a_buffer.as_ptr(),
         a_offset as u64,
         a_ld as u64,
-        b_buffer.as_ptr().cast::<_cl_mem>(),
+        b_buffer.as_ptr(),
         b_offset as u64,
         b_ld as u64,
         beta,
-        c_buffer.as_ptr().cast::<_cl_mem>(),
+        c_buffer.as_ptr(),
         c_offset as u64,
         c_ld as u64,
-        &mut q.cast::<_cl_command_queue>(),
+        &mut q,
         ev,
     );
 
@@ -118,10 +118,10 @@ pub unsafe fn blast_dgemm<En: ClNullEventPtr>(
     queue: &ocl_core::CommandQueue,
     event: Option<En>,
 ) -> Result<(), Error> {
-    let q = queue.as_ptr();
-    let ev: *mut *mut _cl_event = match event {
-        None => &mut ptr::null_mut::<_cl_event>(),
-        Some(mut event) => &mut event.alloc_new().cast::<_cl_event>(),
+    let mut q = queue.as_ptr();
+    let ev: *mut *mut c_void = match event {
+        None => &mut ptr::null_mut::<c_void>(),
+        Some(mut event) => &mut event.alloc_new().cast::<c_void>(),
     };
 
     let status_code = CLBlastDgemm(
@@ -132,17 +132,17 @@ pub unsafe fn blast_dgemm<En: ClNullEventPtr>(
         n as u64,
         k as u64,
         alpha,
-        a_buffer.as_ptr().cast::<_cl_mem>(),
+        a_buffer.as_ptr(),
         a_offset as u64,
         a_ld as u64,
-        b_buffer.as_ptr().cast::<_cl_mem>(),
+        b_buffer.as_ptr(),
         b_offset as u64,
         b_ld as u64,
         beta,
-        c_buffer.as_ptr().cast::<_cl_mem>(),
+        c_buffer.as_ptr(),
         c_offset as u64,
         c_ld as u64,
-        &mut q.cast::<_cl_command_queue>(),
+        &mut q,
         ev,
     );
 
@@ -199,10 +199,10 @@ pub unsafe fn blast_ssymm<En: ClNullEventPtr>(
     queue: &ocl_core::CommandQueue,
     event: Option<En>,
 ) -> Result<(), Error> {
-    let q = queue.as_ptr();
-    let ev: *mut *mut _cl_event = match event {
-        None => &mut ptr::null_mut::<_cl_event>(),
-        Some(mut event) => &mut event.alloc_new().cast::<_cl_event>(),
+    let mut q = queue.as_ptr();
+    let ev: *mut *mut c_void = match event {
+        None => &mut ptr::null_mut::<c_void>(),
+        Some(mut event) => &mut event.alloc_new().cast::<c_void>(),
     };
 
     let status_code = CLBlastSsymm(
@@ -212,17 +212,17 @@ pub unsafe fn blast_ssymm<En: ClNullEventPtr>(
         m as u64,
         n as u64,
         alpha,
-        a_buffer.as_ptr().cast::<_cl_mem>(),
+        a_buffer.as_ptr(),
         a_offset as u64,
         a_ld as u64,
-        b_buffer.as_ptr().cast::<_cl_mem>(),
+        b_buffer.as_ptr(),
         b_offset as u64,
         b_ld as u64,
         beta,
-        c_buffer.as_ptr().cast::<_cl_mem>(),
+        c_buffer.as_ptr(),
         c_offset as u64,
         c_ld as u64,
-        &mut q.cast::<_cl_command_queue>(),
+        &mut q,
         ev,
     );
 
@@ -253,10 +253,10 @@ pub unsafe fn blast_dsymm<En: ClNullEventPtr>(
     queue: &ocl_core::CommandQueue,
     event: Option<En>,
 ) -> Result<(), Error> {
-    let q = queue.as_ptr();
-    let ev: *mut *mut _cl_event = match event {
-        None => &mut ptr::null_mut::<_cl_event>(),
-        Some(mut event) => &mut event.alloc_new().cast::<_cl_event>(),
+    let mut q = queue.as_ptr();
+    let ev: *mut *mut c_void = match event {
+        None => &mut ptr::null_mut::<c_void>(),
+        Some(mut event) => &mut event.alloc_new().cast::<c_void>(),
     };
 
     let status_code = CLBlastDsymm(
@@ -266,17 +266,17 @@ pub unsafe fn blast_dsymm<En: ClNullEventPtr>(
         m as u64,
         n as u64,
         alpha,
-        a_buffer.as_ptr().cast::<_cl_mem>(),
+        a_buffer.as_ptr(),
         a_offset as u64,
         a_ld as u64,
-        b_buffer.as_ptr().cast::<_cl_mem>(),
+        b_buffer.as_ptr(),
         b_offset as u64,
         b_ld as u64,
         beta,
-        c_buffer.as_ptr().cast::<_cl_mem>(),
+        c_buffer.as_ptr(),
         c_offset as u64,
         c_ld as u64,
-        &mut q.cast::<_cl_command_queue>(),
+        &mut q,
         ev,
     );
 
@@ -517,8 +517,8 @@ mod test {
                 buffer[get_global_id(0)] += scalar;
             }
         "#;
-        let width = 10240;
-        let height = 800;
+        let width = 32;
+        let height = 32;
 
         let pro_que = ProQue::builder()
             .src(src)

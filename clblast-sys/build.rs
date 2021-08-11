@@ -35,7 +35,11 @@ fn main() {
         .allowlist_function("clblast.CLBlast.*")
         .allowlist_var("clblast.CLBLAST.*")
         .allowlist_var("clblast.CLBlast.*")
-        // .blocklist_type("cl.*")
+        .allowlist_type("cl_double2")
+        .blocklist_type("_?cl_event")
+        .blocklist_type("_?cl_command_queue")
+        .blocklist_type("_?cl_mem")
+        .blocklist_type("_?cl_device_id")
         .generate()
         .expect("Unable to generate bindings");
 
