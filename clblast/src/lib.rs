@@ -21,10 +21,8 @@ use ocl::Queue;
 use ocl_core::wait_for_events;
 use ocl_core::Event;
 use ocl_core::OclNum;
+use typed_builder::TypedBuilder;
 mod result;
-
-#[macro_use]
-extern crate derive_builder;
 
 use result::Error;
 
@@ -101,7 +99,7 @@ where
     T: OclPrm,
     L: MatrixLayout,
 {
-    pub fn new(columns: usize, rows: usize, buffer: Buffer<T>) -> Self {
+    pub fn new(columns: usize, rows: usize, buffer: Buffer<T>, layout: L) -> Self {
         assert!(rows * columns <= buffer.len());
         MatrixBuffer {
             rows,
@@ -129,14 +127,13 @@ impl NeutralMul for f32 {
     const one: f32 = 1.0;
 }
 
-#[derive(Builder)]
-#[builder(pattern = "owned", public)]
+#[derive(TypedBuilder)]
 pub struct MatrixMultiplication<'a, T, L>
 where
     T: OclPrm + NeutralAdd + NeutralMul,
     L: MatrixLayout,
 {
-    // Queue
+    //Queue
     queue: &'a Queue,
 
     // Matrices
@@ -145,62 +142,51 @@ where
     c: &'a mut MatrixBuffer<T, L>,
 
     // factors
-    #[builder(default = "NeutralMul::one")]
+    #[builder(default=NeutralMul::one)]
     alpha: T,
-    #[builder(default = "NeutralAdd::zero")]
+    #[builder(default=NeutralAdd::zero)]
     beta: T,
 
     // transpose
-    #[builder(default = "MatrixTranspose::No")]
+    #[builder(default=MatrixTranspose::No)]
     transpose_a: MatrixTranspose,
-    #[builder(default = "MatrixTranspose::No")]
+    #[builder(default=MatrixTranspose::No)]
     transpose_b: MatrixTranspose,
 }
 
-impl<'a, L> MatrixMultiplicationBuilder<'a, f32, L>
+impl<'a, L> MatrixMultiplication<'a, f32, L>
 where
     L: MatrixLayout,
 {
-    unsafe fn run(self) -> Result<(), result::Error> {
-        let MatrixMultiplication {
-            a,
-            b,
-            c,
-            alpha,
-            beta,
-            transpose_a,
-            transpose_b,
-            queue,
-        } = self.build().unwrap();
+    unsafe fn run(self) -> Result<(), Error> {
+        assert_eq!(self.a.columns, self.b.rows, "a.columns /= b.rows (k)");
+        let k = self.a.columns;
 
-        assert_eq!(a.columns, b.rows, "a.columns /= b.rows (k)");
-        let k = a.columns;
+        assert_eq!(self.b.columns, self.c.columns, "b.columns /= c.columns (n)");
+        let n = self.b.columns;
 
-        assert_eq!(b.columns, c.columns, "b.columns /= c.columns (n)");
-        let n = b.columns;
-
-        assert_eq!(c.rows, a.rows, "c.columns /= a.rows (m)");
-        let m = c.columns;
+        assert_eq!(self.c.rows, self.a.rows, "c.columns /= a.rows (m)");
+        let m = self.c.columns;
 
         let res = CLBlastSgemm(
             <L as MatrixLayout>::to_c(),
-            transpose_a.to_c(),
-            transpose_b.to_c(),
+            MatrixTranspose::No.to_c(),
+            MatrixTranspose::No.to_c(),
             m as u64,
             n as u64,
             k as u64,
-            alpha,
-            a.buffer.as_ptr(),
-            a.offset as u64,
+            self.alpha,
+            self.a.buffer.as_ptr(),
+            self.a.offset as u64,
             k as u64,
-            b.buffer.as_ptr(),
-            b.offset as u64,
+            self.b.buffer.as_ptr(),
+            self.b.offset as u64,
             n as u64,
-            beta,
-            c.buffer.as_ptr(),
-            c.offset as u64,
+            self.beta,
+            self.c.buffer.as_ptr(),
+            self.c.offset as u64,
             n as u64,
-            &mut queue.as_ptr(),
+            &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
 
@@ -208,28 +194,38 @@ where
     }
 }
 
-pub trait MultiplicationExecutor<T, L>
+pub trait MultiplicationExecutor<'a, T, L: 'a>
 where
-    T: OclPrm + NeutralAdd + NeutralMul,
+    T: OclPrm + NeutralMul + NeutralAdd,
     L: MatrixLayout,
 {
-    /// Computes `C := alpha * A * B + beta * C` on single precision floats
-    ///
-    /// # Arguments
-    /// - Matrix A: K⨯M (K Wide, M High)
-    /// - Matrix B: N⨯K (N Wide, K High)
-    /// - Matrix C: M⨯N (N Wide, M High)
-    ///
-    /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
-    fn multiply<'a>(self: &'a Self) -> MatrixMultiplicationBuilder<'a, T, L>;
+    // /// Computes `C := alpha * A * B + beta * C` on single precision floats
+    // ///
+    // /// # Arguments
+    // /// - Matrix A: K⨯M (K Wide, M High)
+    // /// - Matrix B: N⨯K (N Wide, K High)
+    // /// - Matrix C: M⨯N (N Wide, M High)
+    // ///
+    // /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+    // unsafe fn multiply(
+    //     self: &'a Self,
+    //     task: MatrixMultiplication<'a, T, L>
+    // ) -> Result<(), Error>;
+
+    fn gemm(
+        self: &'a Self,
+    ) -> MatrixMultiplicationBuilder<'a, ((&'a Queue,), (), (), (), (), (), (), ()), T, L>;
 }
 
-impl<L> MultiplicationExecutor<f32, L> for Queue
+impl<'a, T, L: 'a> MultiplicationExecutor<'a, T, L> for Queue
 where
+    T: OclPrm + NeutralMul + NeutralAdd,
     L: MatrixLayout,
 {
-    fn multiply<'a>(self: &'a Self) -> MatrixMultiplicationBuilder<'a, f32, L> {
-        MatrixMultiplicationBuilder::default().queue(self)
+    fn gemm(
+        self: &'a Self,
+    ) -> MatrixMultiplicationBuilder<'a, ((&'a Queue,), (), (), (), (), (), (), ()), T, L> {
+        MatrixMultiplication::<'a, T, L>::builder().queue(&self)
     }
 }
 
@@ -301,7 +297,7 @@ mod test {
         "#;
         let no_streams = 64;
         let no_samples = 64;
-        let mut rng = ChaCha20Rng::seed_from_u64(133701010);
+        let mut rng = ChaCha20Rng::seed_from_u64(1337110);
 
         let pro_que = ProQue::builder()
             .src(src)
@@ -322,7 +318,7 @@ mod test {
 
         a_buffer.write(&a_val[..]).enq().unwrap();
 
-        let a : MatrixBuffer<_, LayoutRowMajor> = MatrixBuffer::new(no_streams, no_streams, a_buffer);
+        let a = MatrixBuffer::new(no_streams, no_streams, a_buffer, LayoutRowMajor);
 
         let b_val = (0..no_streams * no_samples)
             .map(|_| rng.gen::<f32>())
@@ -338,7 +334,7 @@ mod test {
 
         b_buffer.write(&b_val[..]).enq().unwrap();
 
-        let b = MatrixBuffer::new(no_samples, no_streams, b_buffer);
+        let b = MatrixBuffer::new(no_samples, no_streams, b_buffer, LayoutRowMajor);
 
         let c_buffer = pro_que
             .buffer_builder()
@@ -347,38 +343,25 @@ mod test {
             .fill_val(0f32)
             .build()
             .unwrap();
-        let mut c = MatrixBuffer::new(no_samples, no_streams, c_buffer);
+        let mut c = MatrixBuffer::new(no_samples, no_streams, c_buffer, LayoutRowMajor);
 
         let before = Instant::now();
         println!("run..");
-        unsafe {
-            pro_que.queue().multiply().a(&a).b(&b).c(&mut c).run()?;
-        }
+        unsafe { pro_que.queue().gemm().a(&a).b(&b).c(&mut c).build().run()? };
 
         let mut c_dat = vec![0.0; no_streams * no_samples];
         c.buffer.read(&mut c_dat[..]).enq().unwrap();
 
-        println!("{:?} {:?}", &c_dat[0..10], before.elapsed());
+        println!("gpu: {:?} {:?}", &c_dat[0..10], before.elapsed());
         let reference_result = reference_implementation(no_samples, no_streams, &b_val, &a_val);
+        println!("ref: {:?}", &reference_result[0..10]);
         assert_eq!(c_dat.len(), reference_result.len());
         c_dat
             .iter()
             .zip(reference_result)
             .for_each(|(&res, ref_res)| {
-                assert!((res - ref_res) < 0.01, "{} ~= {}", res, ref_res);
+                assert!((res - ref_res) < 0.1, "{} ~= {}", res, ref_res);
             });
-        Ok(())
-    }
-
-    #[test]
-    fn test_mem_leak() -> Result<(), Box<dyn Error>> {
-        for _ in 0..40 {
-            println!("run..");
-            test_gemm()?;
-            println!("waiting..");
-            sleep(Duration::from_secs(1));
-            println!("waiting done");
-        }
         Ok(())
     }
 }
