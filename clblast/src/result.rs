@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use clblast_sys::CLBlastStatusCode__CLBlastSuccess;
+use clblast_sys::*;
 use ocl::ffi::c_int;
 use snafu::{ensure, Backtrace, ErrorCompat, ResultExt, Snafu};
 
@@ -164,7 +164,7 @@ impl BlastError {
       #![allow(non_upper_case_globals)]
 
       match status_code {
-          CLBlastStatusCode__CLBlastInsufficientMemoryTemp => {
+          _ if { status_code == CLBlastStatusCode__CLBlastInsufficientMemoryTemp } => {
               Some(BlastError::InsufficientMemoryTemp)
           }
           CLBlastStatusCode__CLBlastInvalidBatchCount => Some(BlastError::InvalidBatchCount),

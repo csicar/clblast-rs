@@ -1,48 +1,57 @@
+use std::marker::PhantomData;
 use std::ptr;
 
+use clblast_sys::CLBlastLayout;
 use clblast_sys::CLBlastLayout__CLBlastLayoutColMajor;
 use clblast_sys::CLBlastLayout__CLBlastLayoutRowMajor;
 use clblast_sys::CLBlastSgemm;
+use clblast_sys::CLBlastSide;
 use clblast_sys::CLBlastSide__CLBlastSideLeft;
 use clblast_sys::CLBlastSide__CLBlastSideRight;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeConjugate;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeNo;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeYes;
-use clblast_sys::CLBlastSide;
-use clblast_sys::CLBlastLayout;
 use clblast_sys::CLBlastTriangle__CLBlastTriangleLower;
 use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
+use ocl::ffi::c_uint;
 use ocl::Buffer;
 use ocl::OclPrm;
+use ocl::OclScl;
 use ocl::Queue;
-use ocl::ffi::c_uint;
 use ocl_core::wait_for_events;
 use ocl_core::Event;
-mod builder;
+use ocl_core::OclNum;
 mod result;
+
+#[macro_use]
+extern crate derive_builder;
 
 use result::Error;
 
-pub enum MatrixLayout {
-    ColMajor,
-    RowMajor,
-  }
-  impl MatrixLayout {
-    fn to_c(&self) -> c_uint {
-        match self {
-            Self::ColMajor => CLBlastLayout__CLBlastLayoutColMajor,
-            Self::RowMajor => CLBlastLayout__CLBlastLayoutRowMajor,
-        }
+pub trait MatrixLayout {
+    fn to_c() -> c_uint;
+}
+
+pub struct LayoutColMajor;
+impl MatrixLayout for LayoutColMajor {
+    fn to_c() -> c_uint {
+        CLBlastLayout__CLBlastLayoutColMajor
     }
-  }
-  
-  pub enum MatrixTranspose {
+}
+pub struct LayoutRowMajor;
+impl MatrixLayout for LayoutRowMajor {
+    fn to_c() -> c_uint {
+        CLBlastLayout__CLBlastLayoutRowMajor
+    }
+}
+
+pub enum MatrixTranspose {
     Yes,
     No,
     Conjugate,
-  }
-  
-  impl MatrixTranspose {
+}
+
+impl MatrixTranspose {
     fn to_c(&self) -> c_uint {
         match self {
             Self::Yes => CLBlastTranspose__CLBlastTransposeYes,
@@ -50,91 +59,120 @@ pub enum MatrixLayout {
             Self::Conjugate => CLBlastTranspose__CLBlastTransposeConjugate,
         }
     }
-  }
-  
-  
-  pub enum MultiplicationSide {
+}
+
+pub enum MultiplicationSide {
     Left,
-    Right
-  }
-  impl MultiplicationSide {
+    Right,
+}
+impl MultiplicationSide {
     fn to_c(self: &Self) -> CLBlastSide {
         match self {
             MultiplicationSide::Left => CLBlastSide__CLBlastSideLeft,
             MultiplicationSide::Right => CLBlastSide__CLBlastSideRight,
         }
     }
-  }
-  
-  pub enum TriangleLayout {
+}
+
+pub enum TriangleLayout {
     Upper,
-    Lower
-  }
-  
-  impl TriangleLayout{ 
+    Lower,
+}
+
+impl TriangleLayout {
     fn to_c(self: &Self) -> CLBlastLayout {
         match self {
             TriangleLayout::Upper => CLBlastTriangle__CLBlastTriangleUpper,
             TriangleLayout::Lower => CLBlastTriangle__CLBlastTriangleLower,
         }
     }
-  }
-  
-  
+}
 
-pub struct RowMatrix<T: OclPrm> {
+pub struct MatrixBuffer<T: OclPrm, L: MatrixLayout> {
     rows: usize,
     columns: usize,
     offset: usize,
     pub buffer: Buffer<T>,
+    layout: PhantomData<L>,
 }
 
-impl<T> RowMatrix<T>
+impl<T, L> MatrixBuffer<T, L>
 where
     T: OclPrm,
+    L: MatrixLayout,
 {
     pub fn new(columns: usize, rows: usize, buffer: Buffer<T>) -> Self {
         assert!(rows * columns <= buffer.len());
-        RowMatrix {
+        MatrixBuffer {
             rows,
             columns,
             offset: 0,
             buffer,
+            layout: PhantomData::<L>,
         }
     }
 }
 
-pub trait MultiplicationExecutor<T>
-where
-    T: OclPrm,
-{
-    /// Computes `C := alpha * A * B + beta * C` on single precision floats
-    ///
-    /// # Arguments
-    /// - Matrix A: K⨯M (K Wide, M High)
-    /// - Matrix B: N⨯K (N Wide, K High)
-    /// - Matrix C: M⨯N (N Wide, M High)
-    ///
-    /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
-    unsafe fn multiply(
-        self: &Self,
-        a: &RowMatrix<T>,
-        b: &RowMatrix<T>,
-        c: &mut RowMatrix<T>,
-        alpha: T,
-        beta: T,
-    ) -> Result<(), Error>;
+pub trait NeutralAdd {
+    const zero: Self;
 }
 
-impl MultiplicationExecutor<f32> for Queue {
-    unsafe fn multiply(
-        self: &Queue,
-        a: &RowMatrix<f32>,
-        b: &RowMatrix<f32>,
-        c: &mut RowMatrix<f32>,
-        alpha: f32,
-        beta: f32,
-    ) -> Result<(), Error> {
+impl NeutralAdd for f32 {
+    const zero: f32 = 0.0;
+}
+
+pub trait NeutralMul {
+    const one: Self;
+}
+
+impl NeutralMul for f32 {
+    const one: f32 = 1.0;
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned", public)]
+pub struct MatrixMultiplication<'a, T, L>
+where
+    T: OclPrm + NeutralAdd + NeutralMul,
+    L: MatrixLayout,
+{
+    // Queue
+    queue: &'a Queue,
+
+    // Matrices
+    a: &'a MatrixBuffer<T, L>,
+    b: &'a MatrixBuffer<T, L>,
+    c: &'a mut MatrixBuffer<T, L>,
+
+    // factors
+    #[builder(default = "NeutralMul::one")]
+    alpha: T,
+    #[builder(default = "NeutralAdd::zero")]
+    beta: T,
+
+    // transpose
+    #[builder(default = "MatrixTranspose::No")]
+    transpose_a: MatrixTranspose,
+    #[builder(default = "MatrixTranspose::No")]
+    transpose_b: MatrixTranspose,
+}
+
+impl<'a, L> MatrixMultiplicationBuilder<'a, f32, L>
+where
+    L: MatrixLayout,
+{
+    unsafe fn run(self) -> Result<(), result::Error> {
+        let MatrixMultiplication {
+            a,
+            b,
+            c,
+            alpha,
+            beta,
+            transpose_a,
+            transpose_b,
+            queue,
+        } = self.build().unwrap();
+
         assert_eq!(a.columns, b.rows, "a.columns /= b.rows (k)");
         let k = a.columns;
 
@@ -145,9 +183,9 @@ impl MultiplicationExecutor<f32> for Queue {
         let m = c.columns;
 
         let res = CLBlastSgemm(
-            MatrixLayout::RowMajor.to_c(),
-            MatrixTranspose::No.to_c(),
-            MatrixTranspose::No.to_c(),
+            <L as MatrixLayout>::to_c(),
+            transpose_a.to_c(),
+            transpose_b.to_c(),
             m as u64,
             n as u64,
             k as u64,
@@ -162,14 +200,38 @@ impl MultiplicationExecutor<f32> for Queue {
             c.buffer.as_ptr(),
             c.offset as u64,
             n as u64,
-            &mut self.as_ptr(),
-            &mut ptr::null_mut()
+            &mut queue.as_ptr(),
+            &mut ptr::null_mut(),
         );
 
         Error::from_c_either(res)
     }
 }
 
+pub trait MultiplicationExecutor<T, L>
+where
+    T: OclPrm + NeutralAdd + NeutralMul,
+    L: MatrixLayout,
+{
+    /// Computes `C := alpha * A * B + beta * C` on single precision floats
+    ///
+    /// # Arguments
+    /// - Matrix A: K⨯M (K Wide, M High)
+    /// - Matrix B: N⨯K (N Wide, K High)
+    /// - Matrix C: M⨯N (N Wide, M High)
+    ///
+    /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+    fn multiply<'a>(self: &'a Self) -> MatrixMultiplicationBuilder<'a, T, L>;
+}
+
+impl<L> MultiplicationExecutor<f32, L> for Queue
+where
+    L: MatrixLayout,
+{
+    fn multiply<'a>(self: &'a Self) -> MatrixMultiplicationBuilder<'a, f32, L> {
+        MatrixMultiplicationBuilder::default().queue(self)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -260,7 +322,7 @@ mod test {
 
         a_buffer.write(&a_val[..]).enq().unwrap();
 
-        let a = RowMatrix::new(no_streams, no_streams, a_buffer);
+        let a : MatrixBuffer<_, LayoutRowMajor> = MatrixBuffer::new(no_streams, no_streams, a_buffer);
 
         let b_val = (0..no_streams * no_samples)
             .map(|_| rng.gen::<f32>())
@@ -276,7 +338,7 @@ mod test {
 
         b_buffer.write(&b_val[..]).enq().unwrap();
 
-        let b = RowMatrix::new(no_samples, no_streams, b_buffer);
+        let b = MatrixBuffer::new(no_samples, no_streams, b_buffer);
 
         let c_buffer = pro_que
             .buffer_builder()
@@ -285,12 +347,12 @@ mod test {
             .fill_val(0f32)
             .build()
             .unwrap();
-        let mut c = RowMatrix::new(no_samples, no_streams, c_buffer);
+        let mut c = MatrixBuffer::new(no_samples, no_streams, c_buffer);
 
         let before = Instant::now();
         println!("run..");
         unsafe {
-            pro_que.queue().multiply(&a, &b, &mut c, 1.0, 0.0)?;
+            pro_que.queue().multiply().a(&a).b(&b).c(&mut c).run()?;
         }
 
         let mut c_dat = vec![0.0; no_streams * no_samples];

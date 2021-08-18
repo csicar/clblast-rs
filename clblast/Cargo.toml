@@ -12,8 +12,8 @@ edition = "2018"
 [dependencies]
 ocl="0.19.3"
 ocl-core="0.11.2"
-clblast-sys = { version = "0.1.0", path = "../clblast-sys" }
-typed-builder="0.9.0"
+clblast-sys = { version = "0.2.0", path = "../clblast-sys" }
+derive_builder="0.10.2"
 snafu="0.6.10"
 
 [dev-dependencies]
