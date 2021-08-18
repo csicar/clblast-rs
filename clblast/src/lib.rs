@@ -16,11 +16,7 @@ use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
 use ocl::ffi::c_uint;
 use ocl::Buffer;
 use ocl::OclPrm;
-use ocl::OclScl;
 use ocl::Queue;
-use ocl_core::wait_for_events;
-use ocl_core::Event;
-use ocl_core::OclNum;
 use typed_builder::TypedBuilder;
 mod result;
 
@@ -99,7 +95,7 @@ where
     T: OclPrm,
     L: MatrixLayout,
 {
-    pub fn new(columns: usize, rows: usize, buffer: Buffer<T>, layout: L) -> Self {
+    pub fn new(columns: usize, rows: usize, buffer: Buffer<T>, _layout: L) -> Self {
         assert!(rows * columns <= buffer.len());
         MatrixBuffer {
             rows,
@@ -109,22 +105,38 @@ where
             layout: PhantomData::<L>,
         }
     }
+
+    pub fn new_default(
+        pro_que: &ocl::ProQue,
+        columns: usize,
+        rows: usize,
+        fill_val: T,
+        layout: L,
+    ) -> Self {
+        let buffer = pro_que
+            .buffer_builder()
+            .len(columns * rows)
+            .fill_val(fill_val)
+            .build()
+            .unwrap();
+        Self::new(columns, rows, buffer, layout)
+    }
 }
 
 pub trait NeutralAdd {
-    const zero: Self;
+    const ZERO: Self;
 }
 
 impl NeutralAdd for f32 {
-    const zero: f32 = 0.0;
+    const ZERO: f32 = 0.0;
 }
 
 pub trait NeutralMul {
-    const one: Self;
+    const ONE: Self;
 }
 
 impl NeutralMul for f32 {
-    const one: f32 = 1.0;
+    const ONE: f32 = 1.0;
 }
 
 #[derive(TypedBuilder)]
@@ -142,9 +154,9 @@ where
     c: &'a mut MatrixBuffer<T, L>,
 
     // factors
-    #[builder(default=NeutralMul::one)]
+    #[builder(default=NeutralMul::ONE)]
     alpha: T,
-    #[builder(default=NeutralAdd::zero)]
+    #[builder(default=NeutralAdd::ZERO)]
     beta: T,
 
     // transpose
@@ -158,7 +170,7 @@ impl<'a, L> MatrixMultiplication<'a, f32, L>
 where
     L: MatrixLayout,
 {
-    unsafe fn run(self) -> Result<(), Error> {
+    pub unsafe fn run(self) -> Result<(), Error> {
         assert_eq!(self.a.columns, self.b.rows, "a.columns /= b.rows (k)");
         let k = self.a.columns;
 
@@ -170,8 +182,8 @@ where
 
         let res = CLBlastSgemm(
             <L as MatrixLayout>::to_c(),
-            MatrixTranspose::No.to_c(),
-            MatrixTranspose::No.to_c(),
+            self.transpose_a.to_c(),
+            self.transpose_b.to_c(),
             m as u64,
             n as u64,
             k as u64,
@@ -199,19 +211,43 @@ where
     T: OclPrm + NeutralMul + NeutralAdd,
     L: MatrixLayout,
 {
-    // /// Computes `C := alpha * A * B + beta * C` on single precision floats
-    // ///
-    // /// # Arguments
-    // /// - Matrix A: K⨯M (K Wide, M High)
-    // /// - Matrix B: N⨯K (N Wide, K High)
-    // /// - Matrix C: M⨯N (N Wide, M High)
-    // ///
-    // /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
-    // unsafe fn multiply(
-    //     self: &'a Self,
-    //     task: MatrixMultiplication<'a, T, L>
-    // ) -> Result<(), Error>;
-
+    /// Computes `C := alpha * A * B + beta * C`
+    ///
+    /// # Arguments
+    /// - Matrix A: K⨯M (K Wide, M High)
+    /// - Matrix B: N⨯K (N Wide, K High)
+    /// - Matrix C: M⨯N (N Wide, M High)
+    ///
+    /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+    ///
+    /// # Example
+    /// ```
+    /// use clblast::{MatrixBuffer, LayoutRowMajor, MultiplicationExecutor};
+    /// use ocl::ProQue;
+    /// let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
+    /// let k = 40;
+    /// let m = 20;
+    /// let n = 10;
+    /// let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
+    /// let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
+    /// let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
+    /// let task = 
+    ///     pro_que
+    ///         .queue()
+    ///         .gemm()
+    ///         .a(&a_matrix)
+    ///         .b(&b_matrix)
+    ///         .c(&mut c_matrix)
+    ///         .build();
+    /// println!("still fine");
+    /// unsafe { task.run() }.unwrap();
+    /// println!("still still fine");
+    /// drop(pro_que);
+    /// drop(a_matrix);
+    /// drop(b_matrix);
+    /// drop(c_matrix);
+    /// println!("fine still fine");
+    /// ```
     fn gemm(
         self: &'a Self,
     ) -> MatrixMultiplicationBuilder<'a, ((&'a Queue,), (), (), (), (), (), (), ()), T, L>;
@@ -234,9 +270,8 @@ mod test {
     use ocl::{flags, ProQue};
     use rand::prelude::*;
     use rand_chacha::ChaCha20Rng;
-    use std::thread::sleep;
-    use std::time::{Duration, Instant};
-    use std::{error::Error, ptr};
+    use std::error::Error;
+    use std::time::Instant;
 
     use super::*;
 
@@ -258,6 +293,28 @@ mod test {
             }
         }
         out
+    }
+    #[test]
+    fn test_2() {
+        use ocl::ProQue;
+        let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
+        let k = 40;
+        let m = 20;
+        let n = 10;
+        let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
+        let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
+        let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
+        unsafe {
+            pro_que
+                .queue()
+                .gemm()
+                .a(&a_matrix)
+                .b(&b_matrix)
+                .c(&mut c_matrix)
+                .build()
+                .run()
+                .unwrap()
+        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use clblast_sys::*;
 use ocl::ffi::c_int;
-use snafu::{ensure, Backtrace, ErrorCompat, ResultExt, Snafu};
+use snafu::{Snafu};
 
 
 #[derive(Debug, Snafu)]
