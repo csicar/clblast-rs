@@ -189,6 +189,7 @@ version = "0.1.0"
 dependencies = [
  "clblast-sys",
  "criterion",
+ "num-complex",
  "ocl",
  "ocl-core",
  "rand 0.8.4",

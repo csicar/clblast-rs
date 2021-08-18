@@ -15,6 +15,7 @@ ocl-core="0.11.2"
 clblast-sys = { version = "0.2.0", path = "../clblast-sys" }
 typed-builder="*"
 snafu="0.6.10"
+num-complex="0.1.43"
 
 [dev-dependencies]
 criterion = "0.3"
