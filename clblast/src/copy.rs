@@ -7,10 +7,11 @@ use crate::{Error, VectorBuffer};
 
 use typed_builder::TypedBuilder;
 
-use clblast_sys::{CLBlastCswap, CLBlastDswap, CLBlastSswap, CLBlastZswap};
+use clblast_sys::{CLBlastCcopy, CLBlastDcopy, CLBlastScopy, CLBlastZcopy};
 
+/// Copies the contents of vector x into vector y.
 #[derive(TypedBuilder)]
-struct VectorSwap<'a, T: OclPrm> {
+struct VectorCopy<'a, T: OclPrm> {
     /// OpenCL command queue associated with a context and device to execute the routine on.
     queue: &'a Queue,
 
@@ -30,11 +31,11 @@ struct VectorSwap<'a, T: OclPrm> {
     y_stride: usize,
 }
 
-trait RunVectorSwap {
+trait RunVectorCopy {
     unsafe fn run(self) -> Result<(), Error>;
 }
 
-fn assert_dimensions<'a, T: OclPrm>(params: &VectorSwap<'a, T>) {
+fn assert_dimensions<'a, T: OclPrm>(params: &VectorCopy<'a, T>) {
     assert!(
         params.x_vector.buffer.len() > params.n * params.x_stride,
         "x buffer is too short for n and x_stride"
@@ -45,11 +46,11 @@ fn assert_dimensions<'a, T: OclPrm>(params: &VectorSwap<'a, T>) {
     );
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
+impl<'a> RunVectorCopy for VectorCopy<'a, f32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastSswap(
+        let res = CLBlastScopy(
             self.n as u64,
             self.x_vector.buffer.as_ptr(),
             self.x_vector.offset as u64,
@@ -65,11 +66,11 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
+impl<'a> RunVectorCopy for VectorCopy<'a, f64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastDswap(
+        let res = CLBlastDcopy(
             self.n as u64,
             self.x_vector.buffer.as_ptr(),
             self.x_vector.offset as u64,
@@ -85,11 +86,11 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
+impl<'a> RunVectorCopy for VectorCopy<'a, Complex32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastCswap(
+        let res = CLBlastCcopy(
             self.n as u64,
             self.x_vector.buffer.as_ptr(),
             self.x_vector.offset as u64,
@@ -105,11 +106,11 @@ impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex64> {
+impl<'a> RunVectorCopy for VectorCopy<'a, Complex64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastZswap(
+        let res = CLBlastZcopy(
             self.n as u64,
             self.x_vector.buffer.as_ptr(),
             self.x_vector.offset as u64,
@@ -138,7 +139,7 @@ mod test {
         let b_buffer = pro_que.create_buffer::<f32>().unwrap();
         let a_matrix = VectorBuffer::builder().buffer(a_buffer).build();
         let b_matrix = VectorBuffer::builder().buffer(b_buffer).build();
-        let task = VectorSwap::builder()
+        let task = VectorCopy::builder()
             .queue(&pro_que.queue())
             .x_vector(&a_matrix)
             .y_vector(&b_matrix)

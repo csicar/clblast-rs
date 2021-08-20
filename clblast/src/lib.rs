@@ -27,6 +27,19 @@ use typed_builder::TypedBuilder;
 pub mod gemm;
 mod result;
 mod swap;
+mod scal;
+mod copy;
+mod axpy;
+mod dot;
+mod dotc;
+mod nrm2;
+mod asum;
+mod sum;
+mod amax;
+mod amin;
+mod max;
+mod min;
+
 
 pub use result::Error;
 
@@ -166,6 +179,10 @@ where
             .build()
             .unwrap();
         Self::new(columns, rows, buffer, layout)
+    }
+
+    pub fn buffer(&self) -> &Buffer<T> {
+        &self.buffer
     }
 }
 

@@ -7,56 +7,50 @@ use crate::{Error, VectorBuffer};
 
 use typed_builder::TypedBuilder;
 
-use clblast_sys::{CLBlastCswap, CLBlastDswap, CLBlastSswap, CLBlastZswap};
+use clblast_sys::{CLBlastiSmax, CLBlastiDmax, CLBlastiCmax, CLBlastiZmax};
 
+///  Index of absolute maximum value in a vector
+/// Finds the index of a maximum (not necessarily the first if there are multiple) of the absolute values in the x vector. The resulting integer index is stored in the imax buffer.
 #[derive(TypedBuilder)]
-struct VectorSwap<'a, T: OclPrm> {
+struct VectorMaxIndex<'a, T: OclPrm> {
     /// OpenCL command queue associated with a context and device to execute the routine on.
     queue: &'a Queue,
 
-    /// number of values to swap
+    /// number of values to accumulate
     n: usize,
 
+    // OpenCl buffer to store the output imax vector
+    imax_vector: &'a VectorBuffer<T>,
     // OpenCl buffer to store the output x vector
     x_vector: &'a VectorBuffer<T>,
-    // OpenCl buffer to store the output y vector
-    y_vector: &'a VectorBuffer<T>,
 
     /// Stride/increment of the output x vector. This value must be greater than 0.
     #[builder(default = 1)]
     x_stride: usize,
-    /// Stride/increment of the output y vector. This value must be greater than 0.
-    #[builder(default = 1)]
-    y_stride: usize,
 }
 
-trait RunVectorSwap {
+trait RunVectorMaxIndex {
     unsafe fn run(self) -> Result<(), Error>;
 }
 
-fn assert_dimensions<'a, T: OclPrm>(params: &VectorSwap<'a, T>) {
+fn assert_dimensions<'a, T: OclPrm>(params: &VectorMaxIndex<'a, T>) {
     assert!(
-        params.x_vector.buffer.len() > params.n * params.x_stride,
+        params.imax_vector.buffer.len() > params.n * params.x_stride,
         "x buffer is too short for n and x_stride"
     );
-    assert!(
-        params.y_vector.buffer.len() > params.n * params.y_stride,
-        "y buffer is too short for n and y_stride"
-    );
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
+impl<'a> RunVectorMaxIndex for VectorMaxIndex<'a, f32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastSswap(
+        let res = CLBlastiSmax(
             self.n as u64,
+            self.imax_vector.buffer.as_ptr(),
+            self.imax_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -65,18 +59,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
+impl<'a> RunVectorMaxIndex for VectorMaxIndex<'a, f64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastDswap(
+        let res = CLBlastiDmax(
             self.n as u64,
+            self.imax_vector.buffer.as_ptr(),
+            self.imax_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -85,18 +78,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
+impl<'a> RunVectorMaxIndex for VectorMaxIndex<'a, Complex32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastCswap(
+        let res = CLBlastiCmax(
             self.n as u64,
+            self.imax_vector.buffer.as_ptr(),
+            self.imax_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -105,18 +97,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex64> {
+impl<'a> RunVectorMaxIndex for VectorMaxIndex<'a, Complex64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastZswap(
+        let res = CLBlastiZmax(
             self.n as u64,
+            self.imax_vector.buffer.as_ptr(),
+            self.imax_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -134,14 +125,14 @@ mod test {
     fn test_float() {
         use ocl::ProQue;
         let pro_que = ProQue::builder().src("").dims(20).build().unwrap();
-        let a_buffer = pro_que.create_buffer::<f32>().unwrap();
-        let b_buffer = pro_que.create_buffer::<f32>().unwrap();
-        let a_matrix = VectorBuffer::builder().buffer(a_buffer).build();
-        let b_matrix = VectorBuffer::builder().buffer(b_buffer).build();
-        let task = VectorSwap::builder()
+        let x_vector = pro_que.create_buffer::<f32>().unwrap();
+        let sum_buffer = pro_que.create_buffer::<f32>().unwrap();
+        let x_vector = VectorBuffer::builder().buffer(x_vector).build();
+        let imax_vector = VectorBuffer::builder().buffer(sum_buffer).build();
+        let task = VectorMaxIndex::builder()
             .queue(&pro_que.queue())
-            .x_vector(&a_matrix)
-            .y_vector(&b_matrix)
+            .x_vector(&x_vector)
+            .imax_vector(&imax_vector)
             .n(10)
             .build();
         unsafe { task.run().unwrap() }

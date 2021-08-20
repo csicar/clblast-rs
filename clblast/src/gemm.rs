@@ -36,7 +36,7 @@ use crate::NeutralMul;
 use crate::ReprSys;
 
 #[derive(TypedBuilder)]
-pub struct MatrixMultiplication<'a, T, L>
+pub struct Gemm<'a, T, L>
 where
     T: OclPrm + NeutralAdd + NeutralMul,
     L: MatrixLayout,
@@ -63,7 +63,7 @@ where
 }
 
 fn assert_dimensions<'a, T: OclPrm + NeutralAdd + NeutralMul, L: MatrixLayout>(
-    params: &MatrixMultiplication<'a, T, L>,
+    params: &Gemm<'a, T, L>,
 ) -> (usize, usize, usize) {
     assert_eq!(params.a.columns, params.b.rows, "a.columns /= b.rows (k)");
     let k = params.a.columns;
@@ -79,11 +79,11 @@ fn assert_dimensions<'a, T: OclPrm + NeutralAdd + NeutralMul, L: MatrixLayout>(
 
     (k, n, m)
 }
-pub trait RunMatrixMultiplication {
+pub trait RunGemm {
     unsafe fn run(self) -> Result<(), Error>;
 }
 
-impl<'a, L> RunMatrixMultiplication for MatrixMultiplication<'a, f32, L>
+impl<'a, L> RunGemm for Gemm<'a, f32, L>
 where
     L: MatrixLayout,
 {
@@ -116,7 +116,7 @@ where
     }
 }
 
-impl<'a, L> RunMatrixMultiplication for MatrixMultiplication<'a, f64, L>
+impl<'a, L> RunGemm for Gemm<'a, f64, L>
 where
     L: MatrixLayout,
 {
@@ -149,7 +149,7 @@ where
     }
 }
 
-impl<'a, L> RunMatrixMultiplication for MatrixMultiplication<'a, Complex32, L>
+impl<'a, L> RunGemm for Gemm<'a, Complex32, L>
 where
     L: MatrixLayout,
 {
@@ -187,7 +187,7 @@ where
     }
 }
 
-impl<'a, L> RunMatrixMultiplication for MatrixMultiplication<'a, Complex64, L>
+impl<'a, L> RunGemm for Gemm<'a, Complex64, L>
 where
     L: MatrixLayout,
 {
@@ -220,64 +220,43 @@ where
     }
 }
 
-pub trait MultiplicationExecutor<'a, T, L: 'a>
-where
-    T: OclPrm + NeutralMul + NeutralAdd,
-    L: MatrixLayout,
-{
-    /// Computes `C := alpha * A * B + beta * C`
-    ///
-    /// # Arguments
-    /// - Matrix A: K⨯M (K Wide, M High)
-    /// - Matrix B: N⨯K (N Wide, K High)
-    /// - Matrix C: M⨯N (N Wide, M High)
-    ///
-    /// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
-    ///
-    /// # Example
-    /// ```no_run
-    /// use ocl::ProQue;
-    /// use crate::clblast::gemm::{MultiplicationExecutor, RunMatrixMultiplication};
-    /// use crate::clblast::{MatrixBuffer, LayoutRowMajor};
-    /// let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
-    /// let k = 40;
-    /// let m = 20;
-    /// let n = 10;
-    /// let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
-    /// let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
-    /// let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
-    /// let task = pro_que
-    ///         .queue()
-    ///         .gemm()
-    ///         .a(&a_matrix)
-    ///         .b(&b_matrix)
-    ///         .c(&mut c_matrix)
-    ///         .build();
-    /// # println!("still fine");
-    /// # unsafe { task.run() }.unwrap();
-    /// # println!("still still fine");
-    /// # drop(pro_que);
-    /// # drop(a_matrix);
-    /// # drop(b_matrix);
-    /// # drop(c_matrix);
-    /// # println!("fine still fine");
-    /// ```
-    fn gemm(
-        self: &'a Self,
-    ) -> MatrixMultiplicationBuilder<'a, ((&'a Queue,), (), (), (), (), (), (), ()), T, L>;
-}
-
-impl<'a, T, L: 'a> MultiplicationExecutor<'a, T, L> for Queue
-where
-    T: OclPrm + NeutralMul + NeutralAdd,
-    L: MatrixLayout,
-{
-    fn gemm(
-        self: &'a Self,
-    ) -> MatrixMultiplicationBuilder<'a, ((&'a Queue,), (), (), (), (), (), (), ()), T, L> {
-        MatrixMultiplication::<'a, T, L>::builder().queue(&self)
-    }
-}
+/// Computes `C := alpha * A * B + beta * C`
+///
+/// # Arguments
+/// - Matrix A: K⨯M (K Wide, M High)
+/// - Matrix B: N⨯K (N Wide, K High)
+/// - Matrix C: M⨯N (N Wide, M High)
+///
+/// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+///
+/// # Example
+/// ```no_run
+/// use ocl::ProQue;
+/// use crate::clblast::gemm::{MultiplicationExecutor, RunMatrixMultiplication};
+/// use crate::clblast::{MatrixBuffer, LayoutRowMajor};
+/// let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
+/// let k = 40;
+/// let m = 20;
+/// let n = 10;
+/// let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
+/// let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
+/// let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
+/// let task = pro_que
+///         .queue()
+///         .gemm()
+///         .a(&a_matrix)
+///         .b(&b_matrix)
+///         .c(&mut c_matrix)
+///         .build();
+/// # println!("still fine");
+/// # unsafe { task.run() }.unwrap();
+/// # println!("still still fine");
+/// # drop(pro_que);
+/// # drop(a_matrix);
+/// # drop(b_matrix);
+/// # drop(c_matrix);
+/// # println!("fine still fine");
+/// ```
 
 #[cfg(test)]
 mod test {
@@ -320,17 +299,13 @@ mod test {
         let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
         let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
         let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
-        unsafe {
-            pro_que
-                .queue()
-                .gemm()
-                .a(&a_matrix)
-                .b(&b_matrix)
-                .c(&mut c_matrix)
-                .build()
-                .run()
-                .unwrap()
-        }
+        let task = Gemm::builder()
+            .queue(&pro_que.queue())
+            .a(&a_matrix)
+            .b(&b_matrix)
+            .c(&mut c_matrix)
+            .build();
+        unsafe { task.run().unwrap() }
     }
 
     #[test]
@@ -420,7 +395,8 @@ mod test {
 
         let before = Instant::now();
         println!("run..");
-        unsafe { pro_que.queue().gemm().a(&a).b(&b).c(&mut c).build().run()? };
+        let task = Gemm::builder().queue(&pro_que.queue()).a(&a).b(&b).c(&mut c).build();
+        unsafe { task.run()? };
 
         let mut c_dat = vec![0.0; no_streams * no_samples];
         c.buffer.read(&mut c_dat[..]).enq().unwrap();

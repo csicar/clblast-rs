@@ -7,56 +7,50 @@ use crate::{Error, VectorBuffer};
 
 use typed_builder::TypedBuilder;
 
-use clblast_sys::{CLBlastCswap, CLBlastDswap, CLBlastSswap, CLBlastZswap};
+use clblast_sys::{CLBlastScsum, CLBlastDsum, CLBlastSsum, CLBlastDzsum};
 
+/// Sum of values in a vector (non-BLAS function)
+/// Accumulates the values of n elements in the x vector. The results are stored in the sum buffer. This routine is the non-absolute version of the xASUM BLAS routine.
 #[derive(TypedBuilder)]
-struct VectorSwap<'a, T: OclPrm> {
+struct VectorSum<'a, T: OclPrm> {
     /// OpenCL command queue associated with a context and device to execute the routine on.
     queue: &'a Queue,
 
-    /// number of values to swap
+    /// number of values to accumulate
     n: usize,
 
     // OpenCl buffer to store the output x vector
-    x_vector: &'a VectorBuffer<T>,
+    sum_vector: &'a VectorBuffer<T>,
     // OpenCl buffer to store the output y vector
-    y_vector: &'a VectorBuffer<T>,
+    x_vector: &'a VectorBuffer<T>,
 
     /// Stride/increment of the output x vector. This value must be greater than 0.
     #[builder(default = 1)]
     x_stride: usize,
-    /// Stride/increment of the output y vector. This value must be greater than 0.
-    #[builder(default = 1)]
-    y_stride: usize,
 }
 
-trait RunVectorSwap {
+trait RunVectorSum {
     unsafe fn run(self) -> Result<(), Error>;
 }
 
-fn assert_dimensions<'a, T: OclPrm>(params: &VectorSwap<'a, T>) {
+fn assert_dimensions<'a, T: OclPrm>(params: &VectorSum<'a, T>) {
     assert!(
-        params.x_vector.buffer.len() > params.n * params.x_stride,
+        params.sum_vector.buffer.len() > params.n * params.x_stride,
         "x buffer is too short for n and x_stride"
     );
-    assert!(
-        params.y_vector.buffer.len() > params.n * params.y_stride,
-        "y buffer is too short for n and y_stride"
-    );
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
+impl<'a> RunVectorSum for VectorSum<'a, f32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastSswap(
+        let res = CLBlastSsum(
             self.n as u64,
+            self.sum_vector.buffer.as_ptr(),
+            self.sum_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -65,18 +59,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
+impl<'a> RunVectorSum for VectorSum<'a, f64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastDswap(
+        let res = CLBlastDsum(
             self.n as u64,
+            self.sum_vector.buffer.as_ptr(),
+            self.sum_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -85,18 +78,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, f64> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
+impl<'a> RunVectorSum for VectorSum<'a, Complex32> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastCswap(
+        let res = CLBlastScsum(
             self.n as u64,
+            self.sum_vector.buffer.as_ptr(),
+            self.sum_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -105,18 +97,17 @@ impl<'a> RunVectorSwap for VectorSwap<'a, Complex32> {
     }
 }
 
-impl<'a> RunVectorSwap for VectorSwap<'a, Complex64> {
+impl<'a> RunVectorSum for VectorSum<'a, Complex64> {
     unsafe fn run(self) -> Result<(), Error> {
         assert_dimensions(&self);
 
-        let res = CLBlastZswap(
+        let res = CLBlastDzsum(
             self.n as u64,
+            self.sum_vector.buffer.as_ptr(),
+            self.sum_vector.offset as u64,
             self.x_vector.buffer.as_ptr(),
-            self.x_vector.offset as u64,
             self.x_stride as u64,
-            self.y_vector.buffer.as_ptr(),
-            self.y_vector.offset as u64,
-            self.y_stride as u64,
+            self.x_vector.offset as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -134,14 +125,14 @@ mod test {
     fn test_float() {
         use ocl::ProQue;
         let pro_que = ProQue::builder().src("").dims(20).build().unwrap();
-        let a_buffer = pro_que.create_buffer::<f32>().unwrap();
-        let b_buffer = pro_que.create_buffer::<f32>().unwrap();
-        let a_matrix = VectorBuffer::builder().buffer(a_buffer).build();
-        let b_matrix = VectorBuffer::builder().buffer(b_buffer).build();
-        let task = VectorSwap::builder()
+        let x_vector = pro_que.create_buffer::<f32>().unwrap();
+        let sum_buffer = pro_que.create_buffer::<f32>().unwrap();
+        let x_vector = VectorBuffer::builder().buffer(x_vector).build();
+        let a_sum = VectorBuffer::builder().buffer(sum_buffer).build();
+        let task = VectorSum::builder()
             .queue(&pro_que.queue())
-            .x_vector(&a_matrix)
-            .y_vector(&b_matrix)
+            .x_vector(&x_vector)
+            .sum_vector(&a_sum)
             .n(10)
             .build();
         unsafe { task.run().unwrap() }
