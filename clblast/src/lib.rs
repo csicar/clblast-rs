@@ -149,6 +149,12 @@ pub struct MatrixBuffer<T: OclPrm, L: MatrixLayout> {
     layout: L,
 }
 
+impl<T : OclPrm, L : MatrixLayout> MatrixBuffer<T, L> {
+    pub fn size(&self) -> usize {
+        self.rows * self.columns
+    }
+}
+
 impl<T, L> MatrixBuffer<T, L>
 where
     T: OclPrm,
