@@ -12,6 +12,7 @@ use clblast_sys::CLBlastSgemm;
 use clblast_sys::CLBlastSide;
 use clblast_sys::CLBlastSide__CLBlastSideLeft;
 use clblast_sys::CLBlastSide__CLBlastSideRight;
+use clblast_sys::CLBlastTranspose;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeConjugate;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeNo;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeYes;
@@ -19,7 +20,6 @@ use clblast_sys::CLBlastTriangle__CLBlastTriangleLower;
 use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
 use num_complex::Complex32;
 use num_complex::Complex64;
-use ocl::ffi::c_uint;
 use ocl::Buffer;
 use ocl::OclPrm;
 use ocl::Queue;
@@ -68,22 +68,22 @@ impl ReprSys for Complex64 {
     }
 }
 
-pub trait MatrixLayout: ReprSys<Representation = c_uint> {}
+pub trait MatrixLayout: ReprSys<Representation = CLBlastLayout> {}
 
 pub struct LayoutColMajor;
 impl ReprSys for LayoutColMajor {
-    type Representation = c_uint;
+    type Representation = CLBlastLayout;
 
-    fn to_c(&self) -> c_uint {
+    fn to_c(&self) -> CLBlastLayout {
         CLBlastLayout__CLBlastLayoutColMajor
     }
 }
 impl MatrixLayout for LayoutColMajor {}
 pub struct LayoutRowMajor;
 impl ReprSys for LayoutRowMajor {
-    type Representation = c_uint;
+    type Representation = CLBlastLayout;
 
-    fn to_c(&self) -> c_uint {
+    fn to_c(&self) -> CLBlastLayout {
         CLBlastLayout__CLBlastLayoutRowMajor
     }
 }
@@ -96,8 +96,8 @@ pub enum MatrixTranspose {
 }
 
 impl ReprSys for MatrixTranspose {
-    type Representation = c_uint;
-    fn to_c(&self) -> c_uint {
+    type Representation = CLBlastTranspose;
+    fn to_c(&self) -> CLBlastTranspose {
         match self {
             Self::Yes => CLBlastTranspose__CLBlastTransposeYes,
             Self::No => CLBlastTranspose__CLBlastTransposeNo,
@@ -111,7 +111,7 @@ pub enum MultiplicationSide {
     Right,
 }
 impl ReprSys for MultiplicationSide {
-    type Representation = c_uint;
+    type Representation = CLBlastSide;
 
     fn to_c(self: &Self) -> CLBlastSide {
         match self {
@@ -127,7 +127,7 @@ pub enum TriangleLayout {
 }
 
 impl ReprSys for TriangleLayout {
-    type Representation = c_uint;
+    type Representation = CLBlastLayout;
 
     fn to_c(self: &Self) -> CLBlastLayout {
         match self {
