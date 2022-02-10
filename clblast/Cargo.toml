@@ -13,7 +13,7 @@ edition = "2018"
 ocl="0.19.3"
 ocl-core="0.11.2"
 clblast-sys = { version = "0.2.1", path = "../clblast-sys" }
-typed-builder="*"
+typed-builder="0.9.1"
 snafu="0.6.10"
 num-complex="0.1.43"
 
