@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use clblast::LayoutRowMajor;
 use clblast::MatrixBuffer;
-use clblast::gemm::MultiplicationExecutor;
+use clblast::gemm::Gemm;
 use clblast::gemm::RunGemm;
 use criterion::BenchmarkId;
 use ocl::flags;
@@ -101,8 +101,7 @@ fn bench_sgemm(c: &mut Criterion) {
                             .unwrap();
                         println!("write time: {:?}", before_write.elapsed());
                         let before = Instant::now();
-                        let err_code = unsafe { pro_que.queue().gemm().a(&a).b(&b).c(&mut c).build().run() };
-                        println!("err code: {:?}", err_code);
+                        unsafe { Gemm::builder().queue(&pro_que.queue()).a(&a).b(&b).c(&mut c).build(); };
 
                         let mut c_dat = vec![0.0; no_streams * no_samples];
                         c.buffer().read(&mut c_dat[..]).enq().unwrap();
