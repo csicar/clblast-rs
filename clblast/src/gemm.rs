@@ -75,7 +75,7 @@ fn assert_dimensions<'a, T: OclPrm + NeutralAdd + NeutralMul, L: MatrixLayout>(
     let n = params.b.columns;
 
     assert_eq!(params.c.rows, params.a.rows, "c.columns /= a.rows (m)");
-    let m = params.c.columns;
+    let m = params.c.rows;
 
     (k, n, m)
 }
