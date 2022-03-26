@@ -5,6 +5,12 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
+    if let Ok(_) = env::var("DOCS_RS") {
+        // skip bindings generation when running on docs.rs
+        return;
+    }
+
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let dst = Config::new("CLBlast")
         .define("BUILD_SHARED_LIBS", "OFF")

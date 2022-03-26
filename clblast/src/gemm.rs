@@ -29,9 +29,9 @@ use crate::ReprSys;
 ///
 /// ![](https://cnugteren.github.io/tutorial/images/gemm1.png)
 ///
-/// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+/// For details see: <https://cnugteren.github.io/tutorial/pages/page2.html>
 ///
-/// See also: https://petewarden.com/2015/10/25/an-engineers-guide-to-gemm/
+/// See also: <https://petewarden.com/2015/10/25/an-engineers-guide-to-gemm/>
 #[derive(TypedBuilder)]
 pub struct Gemm<'a, T, L>
 where
