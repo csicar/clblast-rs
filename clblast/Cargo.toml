@@ -1,6 +1,6 @@
 [package]
 name = "clblast"
-version = "0.1.3"
+version = "0.1.4"
 description = "clblast bindings for rust"
 license="Apache-2.0"
 repository="https://github.com/csicar/clblast-rs"
