@@ -260,11 +260,13 @@ where
 
 #[cfg(test)]
 mod test {
-    use ocl::{flags, ProQue};
-    use rand::prelude::*;
-    use rand_chacha::ChaCha20Rng;
     use std::error::Error;
     use std::time::Instant;
+
+    use ocl::{flags, ProQue};
+    use pretty_assertions as pretty;
+    use rand::prelude::*;
+    use rand_chacha::ChaCha20Rng;
 
     use crate::LayoutRowMajor;
 
@@ -275,7 +277,7 @@ mod test {
         no_streams: usize,
         samples: &Vec<f32>,
         matrix: &Vec<f32>,
-    ) -> Vec<f32> {
+    ) -> Vec<Vec<f32>> {
         let mut out = vec![0.0; no_samples * no_streams];
 
         for x in 0..no_samples {
@@ -287,29 +289,121 @@ mod test {
                 out[x + y * no_samples] = sum as f32;
             }
         }
-        out
+        out.chunks_exact(no_samples).map(|r| r.to_vec()).collect()
     }
-    #[test]
-    fn test_doc_comment() {
-        use ocl::ProQue;
-        let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
-        let k = 40;
-        let m = 20;
-        let n = 10;
-        let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
-        let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
-        let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
-        let task = Gemm::builder()
-            .queue(&pro_que.queue())
-            .a(&a_matrix)
-            .b(&b_matrix)
-            .c(&mut c_matrix)
-            .build();
-        unsafe { task.run().unwrap() }
+
+    fn format_as_rows(matrix: Vec<Vec<f32>>) -> Vec<String> {
+        matrix
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| format!("{:>5.2}", c))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            })
+            .collect()
+    }
+
+    fn read_buffer_to_matrix(buf: MatrixBuffer<f32, LayoutRowMajor>) -> Vec<Vec<f32>> {
+        let mut out = vec![0.0; buf.size()];
+        buf.buffer().read(&mut out[..]).enq().unwrap();
+
+        out.chunks_exact(buf.columns)
+            .map(|row| row.to_vec())
+            .collect()
+    }
+
+    fn compare_reference_impl(
+        no_samples: usize,
+        no_streams: usize,
+        samples: &Vec<f32>,
+        configuration: &Vec<f32>,
+    ) {
+        pretty::assert_eq!(no_streams * no_streams, configuration.len());
+        pretty::assert_eq!(no_samples * no_streams, samples.len());
+        let reference_result =
+            reference_implementation(no_samples, no_streams, samples, configuration);
+
+        let gpu_result = {
+            let pro_que = ProQue::builder().src("").dims(21).build().unwrap();
+            let k = no_streams;
+            let m = no_streams;
+            let n = no_samples;
+            let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, -1.0, LayoutRowMajor);
+            a_matrix.buffer().write(&configuration[..]).enq().unwrap();
+
+            let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, -1.0, LayoutRowMajor);
+            b_matrix.buffer().write(&samples[..]).enq().unwrap();
+
+            let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, -1.0, LayoutRowMajor);
+
+            let task = Gemm::builder()
+                .queue(&pro_que.queue())
+                .a(&a_matrix)
+                .b(&b_matrix)
+                .c(&mut c_matrix)
+                .build();
+            unsafe { task.run().unwrap() }
+
+            read_buffer_to_matrix(c_matrix)
+        };
+
+        pretty::assert_eq!(
+            format_as_rows(reference_result),
+            format_as_rows(gpu_result),
+            "Expected <left>, but got <right>"
+        );
     }
 
     #[test]
-    fn test_reference() {
+    fn test_compare_1_3() {
+        compare_reference_impl(3, 1, &vec![1.0, 2.0, 3.0], &vec![1.0]);
+    }
+
+    #[test]
+    fn test_compare_20_10() {
+        let no_samples = 20;
+        let no_streams = 10;
+        compare_reference_impl(
+            no_samples,
+            no_streams,
+            &vec![1.2; no_samples * no_streams],
+            &vec![1.0; no_streams * no_streams],
+        );
+    }
+
+    #[test]
+    fn test_compare_23_45_rand() {
+        let mut rng = ChaCha20Rng::seed_from_u64(133701010);
+        let no_samples = 45;
+        let no_streams = 23;
+
+        let samples = (0..no_streams * no_samples)
+            .map(|_| rng.gen::<f32>())
+            .collect::<Vec<_>>();
+
+        let configuration = (0..no_streams * no_streams)
+            .map(|_| rng.gen::<f32>())
+            .collect::<Vec<_>>();
+
+        compare_reference_impl(
+            no_samples,
+            no_streams,
+            &vec![1.2; no_samples * no_streams],
+            &vec![1.0; no_streams * no_streams],
+        );
+    }
+
+    #[test]
+    fn test_reference_1_3() {
+        let res = reference_implementation(3, 1, &vec![1.0, 2.0, 3.0], &vec![1.0]);
+        println!("{:?}", res);
+        let expected_result = vec![vec![1.0, 2.0, 3.0]];
+        pretty::assert_eq!(res, expected_result);
+    }
+
+    #[test]
+    fn test_reference_3_5() {
         let res = reference_implementation(
             3,
             5,
@@ -330,87 +424,12 @@ mod test {
         );
         println!("{:?}", res);
         let expected_result = vec![
-            29.0, 34.0, 39.0, 46.0, 53.0, 60.0, 93.0, 108.0, 123.0, 0.0, 0.0, 0.0, 102.0, 117.0,
-            132.0,
+            vec![ 29.,  34.,  39.],
+            vec![ 46.,  53.,  60.],
+            vec![ 93.,  108.,  123.],
+            vec![0., 0., 0.],
+            vec![ 102.,  117.,  132.],
         ];
-        assert_eq!(res, expected_result);
-    }
-
-    #[test]
-    fn test_gemm() -> Result<(), Box<dyn Error>> {
-        let src = r#"
-            __kernel void add(__global float* buffer, float scalar) {
-                buffer[get_global_id(0)] += scalar;
-            }
-        "#;
-        let no_streams = 64;
-        let no_samples = 64;
-        let mut rng = ChaCha20Rng::seed_from_u64(1337110);
-
-        let pro_que = ProQue::builder()
-            .src(src)
-            .dims(no_streams * no_samples)
-            .build()
-            .unwrap();
-
-        let a_val = (0..no_streams * no_streams)
-            .map(|_| rng.gen::<f32>())
-            .collect::<Vec<_>>();
-
-        let a_buffer = pro_que
-            .buffer_builder()
-            .flags(flags::MEM_READ_WRITE)
-            .len(no_streams * no_streams)
-            .build()
-            .unwrap();
-
-        a_buffer.write(&a_val[..]).enq().unwrap();
-
-        let a = MatrixBuffer::new(no_streams, no_streams, a_buffer, LayoutRowMajor);
-
-        let b_val = (0..no_streams * no_samples)
-            .map(|_| rng.gen::<f32>())
-            .collect::<Vec<_>>();
-
-        let b_buffer = pro_que
-            .buffer_builder()
-            .flags(flags::MEM_READ_WRITE)
-            .len(no_streams * no_samples)
-            .fill_val(4f32)
-            .build()
-            .unwrap();
-
-        b_buffer.write(&b_val[..]).enq().unwrap();
-
-        let b = MatrixBuffer::new(no_samples, no_streams, b_buffer, LayoutRowMajor);
-
-        let c_buffer = pro_que
-            .buffer_builder()
-            .flags(flags::MEM_READ_WRITE)
-            .len(no_streams * no_samples)
-            .fill_val(0f32)
-            .build()
-            .unwrap();
-        let mut c = MatrixBuffer::new(no_samples, no_streams, c_buffer, LayoutRowMajor);
-
-        let before = Instant::now();
-        println!("run..");
-        let task = Gemm::builder().queue(&pro_que.queue()).a(&a).b(&b).c(&mut c).build();
-        unsafe { task.run()? };
-
-        let mut c_dat = vec![0.0; no_streams * no_samples];
-        c.buffer.read(&mut c_dat[..]).enq().unwrap();
-
-        println!("gpu: {:?} {:?}", &c_dat[0..10], before.elapsed());
-        let reference_result = reference_implementation(no_samples, no_streams, &b_val, &a_val);
-        println!("ref: {:?}", &reference_result[0..10]);
-        assert_eq!(c_dat.len(), reference_result.len());
-        c_dat
-            .iter()
-            .zip(reference_result)
-            .for_each(|(&res, ref_res)| {
-                assert!((res - ref_res) < 0.1, "{} ~= {}", res, ref_res);
-            });
-        Ok(())
+        pretty::assert_eq!(res, expected_result);
     }
 }
