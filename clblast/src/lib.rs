@@ -1,14 +1,16 @@
-use std::marker::PhantomData;
-use std::ptr;
+use std::alloc::Layout;
+
+use num_complex::Complex32;
+use num_complex::Complex64;
+use ocl::Buffer;
+use ocl::OclPrm;
+use typed_builder::TypedBuilder;
 
 use clblast_sys::cl_double2;
 use clblast_sys::cl_float2;
-use clblast_sys::CLBlastDgemm;
-use clblast_sys::CLBlastHgemm;
 use clblast_sys::CLBlastLayout;
 use clblast_sys::CLBlastLayout__CLBlastLayoutColMajor;
 use clblast_sys::CLBlastLayout__CLBlastLayoutRowMajor;
-use clblast_sys::CLBlastSgemm;
 use clblast_sys::CLBlastSide;
 use clblast_sys::CLBlastSide__CLBlastSideLeft;
 use clblast_sys::CLBlastSide__CLBlastSideRight;
@@ -18,30 +20,23 @@ use clblast_sys::CLBlastTranspose__CLBlastTransposeNo;
 use clblast_sys::CLBlastTranspose__CLBlastTransposeYes;
 use clblast_sys::CLBlastTriangle__CLBlastTriangleLower;
 use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
-use num_complex::Complex32;
-use num_complex::Complex64;
-use ocl::Buffer;
-use ocl::OclPrm;
-use ocl::Queue;
-use typed_builder::TypedBuilder;
-pub mod gemm;
-mod result;
-mod swap;
-mod scal;
-mod copy;
-mod axpy;
-mod dot;
-mod dotc;
-mod nrm2;
-mod asum;
-mod sum;
+pub use result::Error;
+
 mod amax;
 mod amin;
+mod asum;
+mod axpy;
+mod copy;
+mod dot;
+mod dotc;
+pub mod gemm;
 mod max;
 mod min;
-
-
-pub use result::Error;
+mod nrm2;
+mod result;
+mod scal;
+mod sum;
+mod swap;
 
 pub trait ReprSys {
     type Representation;
@@ -68,8 +63,14 @@ impl ReprSys for Complex64 {
     }
 }
 
-pub trait MatrixLayout: ReprSys<Representation = CLBlastLayout> {}
+pub trait MatrixLayout: ReprSys<Representation = CLBlastLayout> + Default {
+    /// return the default stride (index-distance needed travel between two rows/columns of the matrix)
+    /// - for [`LayoutRowMajor`] this is `columns`
+    /// - for [`LayoutColMajor`] this is `rows`
+    fn default_stride(columns: usize, rows: usize) -> usize;
+}
 
+#[derive(Default)]
 pub struct LayoutColMajor;
 impl ReprSys for LayoutColMajor {
     type Representation = CLBlastLayout;
@@ -78,7 +79,13 @@ impl ReprSys for LayoutColMajor {
         CLBlastLayout__CLBlastLayoutColMajor
     }
 }
-impl MatrixLayout for LayoutColMajor {}
+impl MatrixLayout for LayoutColMajor {
+    fn default_stride(columns: usize, rows: usize) -> usize {
+        rows
+    }
+}
+
+#[derive(Default)]
 pub struct LayoutRowMajor;
 impl ReprSys for LayoutRowMajor {
     type Representation = CLBlastLayout;
@@ -87,7 +94,11 @@ impl ReprSys for LayoutRowMajor {
         CLBlastLayout__CLBlastLayoutRowMajor
     }
 }
-impl MatrixLayout for LayoutRowMajor {}
+impl MatrixLayout for LayoutRowMajor {
+    fn default_stride(columns: usize, rows: usize) -> usize {
+        columns
+    }
+}
 
 pub enum MatrixTranspose {
     Yes,
@@ -145,30 +156,26 @@ pub struct MatrixBuffer<T: OclPrm, L: MatrixLayout> {
     columns: usize,
 
     #[builder(default = 0)]
+    /// Offset of the start of the matrix in the buffer
+    /// I.e. where to start
     offset: usize,
+
+    #[builder(default = L::default_stride(columns, rows))]
+    /// Stride: How far to jump through the outer matrix to get to next column/row
+    /// In the blas nomenclature this is often called *leading dimension* or `ld`
+    stride: usize,
     layout: L,
 }
 
-impl<T : OclPrm, L : MatrixLayout> MatrixBuffer<T, L> {
-    pub fn size(&self) -> usize {
-        self.rows * self.columns
-    }
-}
-
-impl<T, L> MatrixBuffer<T, L>
-where
-    T: OclPrm,
-    L: MatrixLayout,
-{
+impl<T: OclPrm, L: MatrixLayout> MatrixBuffer<T, L> {
     pub fn new(columns: usize, rows: usize, buffer: Buffer<T>, layout: L) -> Self {
         assert!(rows * columns <= buffer.len());
-        MatrixBuffer {
-            rows,
-            columns,
-            offset: 0,
-            buffer,
-            layout,
-        }
+        MatrixBuffer::builder()
+            .rows(rows)
+            .columns(columns)
+            .layout(layout)
+            .buffer(buffer)
+            .build()
     }
 
     pub fn new_default(
@@ -189,6 +196,18 @@ where
 
     pub fn buffer(&self) -> &Buffer<T> {
         &self.buffer
+    }
+    
+    pub fn size(&self) -> usize {
+        self.rows * self.columns
+    }
+
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub fn columns(&self) -> usize {
+        self.columns
     }
 }
 

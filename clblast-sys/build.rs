@@ -26,6 +26,7 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=CLBlast/include/clblast_c.h");
+    println!("cargo:rerun-if-changed=CLBlast/src");
 
     let bindings = bindgen::Builder::default()
         .header("CLBlast/include/clblast_c.h")
