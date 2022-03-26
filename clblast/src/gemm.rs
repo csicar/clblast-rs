@@ -1,31 +1,16 @@
-use std::marker::PhantomData;
 use std::ptr;
 
-use clblast_sys::cl_double2;
-use clblast_sys::cl_float2;
-use clblast_sys::CLBlastCgemm;
-use clblast_sys::CLBlastDgemm;
-use clblast_sys::CLBlastHgemm;
-use clblast_sys::CLBlastLayout;
-use clblast_sys::CLBlastLayout__CLBlastLayoutColMajor;
-use clblast_sys::CLBlastLayout__CLBlastLayoutRowMajor;
-use clblast_sys::CLBlastSgemm;
-use clblast_sys::CLBlastSide;
-use clblast_sys::CLBlastSide__CLBlastSideLeft;
-use clblast_sys::CLBlastSide__CLBlastSideRight;
-use clblast_sys::CLBlastTranspose__CLBlastTransposeConjugate;
-use clblast_sys::CLBlastTranspose__CLBlastTransposeNo;
-use clblast_sys::CLBlastTranspose__CLBlastTransposeYes;
-use clblast_sys::CLBlastTriangle__CLBlastTriangleLower;
-use clblast_sys::CLBlastTriangle__CLBlastTriangleUpper;
-use clblast_sys::CLBlastZgemm;
 use num_complex::Complex32;
 use num_complex::Complex64;
-use ocl::ffi::c_uint;
-use ocl::Buffer;
 use ocl::OclPrm;
 use ocl::Queue;
 use typed_builder::TypedBuilder;
+
+use clblast_sys::cl_float2;
+use clblast_sys::CLBlastCgemm;
+use clblast_sys::CLBlastDgemm;
+use clblast_sys::CLBlastSgemm;
+use clblast_sys::CLBlastZgemm;
 
 use crate::Error;
 use crate::MatrixBuffer;
@@ -35,6 +20,18 @@ use crate::NeutralAdd;
 use crate::NeutralMul;
 use crate::ReprSys;
 
+/// Computes `C := alpha * A * B + beta * C`
+///
+/// # Arguments
+/// - Matrix A: K⨯M (K Wide, M High)
+/// - Matrix B: N⨯K (N Wide, K High)
+/// - Matrix C: M⨯N (N Wide, M High)
+///
+/// ![](https://cnugteren.github.io/tutorial/images/gemm1.png)
+///
+/// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
+///
+/// See also: https://petewarden.com/2015/10/25/an-engineers-guide-to-gemm/
 #[derive(TypedBuilder)]
 pub struct Gemm<'a, T, L>
 where
@@ -62,9 +59,14 @@ where
     transpose_b: MatrixTranspose,
 }
 
-fn assert_dimensions<'a, T: OclPrm + NeutralAdd + NeutralMul, L: MatrixLayout>(
-    params: &Gemm<'a, T, L>,
+fn assert_dimensions<T: OclPrm + NeutralAdd + NeutralMul, L: MatrixLayout>(
+    params: &Gemm<T, L>,
 ) -> (usize, usize, usize) {
+    // Performs the matrix product C = alpha * A * B + beta * C,
+    // in which A (m rows by k columns) and B (k rows by n columns) are two general rectangular input matrices,
+    // C (m rows by n column) is the matrix to be updated, and alpha and beta are scalar values.
+    // The matrices A and/or B can optionally be transposed before performing the operation.
+
     assert_eq!(params.a.columns, params.b.rows, "a.columns /= b.rows (k)");
     let k = params.a.columns;
 
@@ -91,7 +93,7 @@ where
         let (k, n, m) = assert_dimensions(&self);
 
         let res = CLBlastSgemm(
-            self.a.layout.to_c(),
+            L::default().to_c(),
             self.transpose_a.to_c(),
             self.transpose_b.to_c(),
             m as u64,
@@ -100,14 +102,14 @@ where
             self.alpha,
             self.a.buffer.as_ptr(),
             self.a.offset as u64,
-            k as u64,
+            self.a.stride as u64,
             self.b.buffer.as_ptr(),
             self.b.offset as u64,
-            n as u64,
+            self.b.stride as u64,
             self.beta,
             self.c.buffer.as_ptr(),
             self.c.offset as u64,
-            n as u64,
+            self.c.stride as u64,
             &mut self.queue.as_ptr(),
             &mut ptr::null_mut(),
         );
@@ -219,44 +221,6 @@ where
         Error::from_c_either(res)
     }
 }
-
-/// Computes `C := alpha * A * B + beta * C`
-///
-/// # Arguments
-/// - Matrix A: K⨯M (K Wide, M High)
-/// - Matrix B: N⨯K (N Wide, K High)
-/// - Matrix C: M⨯N (N Wide, M High)
-///
-/// For details see: https://cnugteren.github.io/tutorial/pages/page2.html
-///
-/// # Example
-/// ```no_run
-/// use ocl::ProQue;
-/// use crate::clblast::gemm::{MultiplicationExecutor, RunMatrixMultiplication};
-/// use crate::clblast::{MatrixBuffer, LayoutRowMajor};
-/// let pro_que = ProQue::builder().src("").dims(1).build().unwrap();
-/// let k = 40;
-/// let m = 20;
-/// let n = 10;
-/// let a_matrix = MatrixBuffer::new_default(&pro_que, k, m, 1.0, LayoutRowMajor);
-/// let b_matrix = MatrixBuffer::new_default(&pro_que, n, k, 1.0, LayoutRowMajor);
-/// let mut c_matrix = MatrixBuffer::new_default(&pro_que, n, m, 1.0, LayoutRowMajor);
-/// let task = pro_que
-///         .queue()
-///         .gemm()
-///         .a(&a_matrix)
-///         .b(&b_matrix)
-///         .c(&mut c_matrix)
-///         .build();
-/// # println!("still fine");
-/// # unsafe { task.run() }.unwrap();
-/// # println!("still still fine");
-/// # drop(pro_que);
-/// # drop(a_matrix);
-/// # drop(b_matrix);
-/// # drop(c_matrix);
-/// # println!("fine still fine");
-/// ```
 
 #[cfg(test)]
 mod test {
